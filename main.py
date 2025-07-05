@@ -64,7 +64,6 @@ class Lessons:
             "recap_username",
             "recap_password",
             "FILE",
-            "SC_KEY",
         ]
         for key in required_keys:
             if not environ.get(key):
