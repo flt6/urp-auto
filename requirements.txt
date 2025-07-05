@@ -1,6 +1,5 @@
 python-dotenv
 pandas
 requests
-beautifulsoup4
 serverchan-sdk
 openpyxl

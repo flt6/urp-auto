@@ -13,7 +13,6 @@ from typing import Callable, List, Optional
 import dotenv
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 from serverchan_sdk import sc_send as _sc_send
 
 # 配置日志
@@ -206,11 +205,23 @@ class Lessons:
         )
         res.raise_for_status()
         html = res.text
-        bs = BeautifulSoup(html, "html.parser")
-        match = bs.select_one("select#jhxn option[selected]")
-        if not match:
+        # 使用正则表达式替代 BeautifulSoup 来查找选中的学期选项
+        # 由于 HTML 结构特殊，selected 在单独行上，需要向前查找对应的 option
+        lines = html.split('\n')
+        for i, line in enumerate(lines):
+            if 'selected' in line.strip():
+                # 向前查找包含 option value 的行
+                for j in range(i-1, max(0, i-10), -1):
+                    if 'option value=' in lines[j]:
+                        value_match = re.search(r'value="([^"]*)"', lines[j])
+                        if value_match:
+                            self.term = str(value_match.group(1))
+                            break
+                if self.term:
+                    break
+        
+        if not self.term:
             raise LessonsException("未找到学期信息")
-        self.term = str(match.get("value"))
 
         print(self.fajhh, self.term)
 
