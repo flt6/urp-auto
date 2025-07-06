@@ -192,7 +192,7 @@ class Lessons:
     def judge_logout(self, response: requests.Response):
         """检查账号是否在其他地方被登录"""
         if response.url == f"{self.base}/login?errorCode=concurrentSessionExpired":
-            raise LessonsException("有人登录了您的账号！")
+            raise ReloginException("有人登录了您的账号！")
 
     def get_base_info(self):
         res = self.session.get(f"{self.base}/student/courseSelect/gotoSelect/index")
@@ -450,6 +450,8 @@ class Lessons:
                                 errs.appendleft(time())
                                 logger.error(f"获取课程 {lcl[2]} 余量时返回异常")
                                 continue
+                        except ReloginException as e:
+                            raise e
                         except Exception as e:
                             errs.appendleft(time())
                             logger.error(f"获取课程 {lcl[2]} 余量时发生错误: {e}")
@@ -466,6 +468,8 @@ class Lessons:
                                         suc.append(cl)
                                         classes.pop(cl[0])
                                         break
+                                except ReloginException as e:
+                                    raise e
                                 except Exception as e:
                                     errs.appendleft(time())
                                     logger.error(f"选课 {cl[2]}_{cl[1]} 时发生错误: {e}")
