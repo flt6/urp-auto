@@ -31,7 +31,9 @@ logger.addHandler(file)  # 日志输出到文件
 
 class LessonsException(Exception):
     """自定义异常类"""
-
+    pass
+class ReloginException(LessonsException):
+    """用于处理需要重新登录的异常"""
     pass
 
 
@@ -69,6 +71,8 @@ class Lessons:
                 raise LessonsException(f"请在环境变量中设置{key}")
 
         self.base = environ.get("base", "http://jwstudent.lnu.edu.cn")
+        self.interval_1 = int(environ.get("INTERVAL_1", 2))  # 请求间隔，默认为2秒
+        self.interval_2 = int(environ.get("INTERVAL_2", 10))  # 请求间隔，默认为10秒
 
     def _retry_request(
         self, func, max_retries: int = 10, error_msg: str = "请求失败"
@@ -270,20 +274,42 @@ class Lessons:
             "jc": 0,
         }
         response = self._retry_request(lambda: self.session.post(url, data=params))
-        data = response.json()["kylMap"]
-        if len(data) == 0:
-            logger.error(f"课程 {cl[2]} 的余量信息为空: {data}")
-            return
+        with open("response.json", "w", encoding="utf-8") as f:
+            f.write(response.text)
+        data:dict = response.json()
+        
+        cls:list[dict] = data.get("rwfalist", [])
+        if not cls:
+            logger.error(f"课程 {cl[2]} 的课程信息为空: {data}")
+            return None
 
+        for item in cls:
+            if item["classNum"] in cl[1]:
+                print(item["classNum"],type(item["classNum"]))
+                if item["kcm"] != cl[2]:
+                    logger.critical(
+                        f"课程 {cl[2]} 的课程名与查询信息不匹配: {item['kcm']} != {cl[2]}"
+                    )
+                    sc_send(
+                        "选课异常",
+                        desp=f"课程 {cl[2]} 的课程名与查询信息不匹配: {item['kcm']} != {cl[2]}",
+                    )
+                    return None
+    
+        kyl:dict[str,str] = data["kylMap"]
+        if len(kyl) == 0:
+            logger.error(f"课程 {cl[2]} 的余量信息为空: {kyl}")
+            return
         ret = []
         for kxh in cl[1]:
             key = f"{self.term}_{cl[0]}_{kxh}"
-            left = data.get(key, None)
+            left = kyl.get(key, None)
             if left is None:
                 logger.error(
-                    f"课程 {cl[2]} 的余量信息不存在: {key} not in {data.keys()}"
+                    f"课程 {cl[2]} 的余量信息不存在: {key} not in {kyl.keys()}"
                 )
                 ret.append(-1)
+                continue
             ret.append(int(left))
         return ret
 
@@ -389,6 +415,10 @@ class Lessons:
                 if classes.get(id) is None:
                     classes[id] = (id, [kxh], name)
                 else:
+                    if classes[id][2] != name:
+                        raise LessonsException(
+                            f"课程 {name}_{kxh} 的名称不一致: {classes[id][2]} != {name}"
+                        )
                     classes[id][1].append(kxh)
 
             logger.info(f"读取课程信息，共有 {len(classes)} 门课程")
@@ -406,53 +436,70 @@ class Lessons:
                     sc_send("选课异常", desp="最近5次获取课程余量异常，尝试重新登录")
                     self.login()
                     master_err += 1
+                    errs.clear()
                 if master_err >= 3:
                     logger.error("反复发生重要异常，退出程序")
                     sc_send("选课异常", desp="反复发生重要异常，退出程序")
                     return
-                for lcl in classes.copy().values():
-                    logger.info(f"检查课程 {lcl[2]} 余量")
-                    try:
-                        lefts = self.get_left(lcl)
-                        if lefts is None:
-                            errs.appendleft(time())
-                            logger.error(f"获取课程 {lcl[2]} 余量时返回异常")
-                            continue
-                    except Exception as e:
-                        errs.appendleft(time())
-                        logger.error(f"获取课程 {lcl[2]} 余量时发生错误: {e}")
-                        continue
-                    for i, left in enumerate(lefts):
-                        cl = (lcl[0], lcl[1][i], lcl[2])
-                        if left > 0:
-                            logger.info(
-                                f"课程 {cl[2]}_{cl[1]} 有余量: {left}，开始选课"
-                            )
-                            try:
-                                ret = self.select(cl)
-                                if ret:
-                                    suc.append(cl)
-                                    classes.pop(cl[0])
-                                    break
-                            except Exception as e:
+                try:
+                    for lcl in classes.copy().values():
+                        logger.info(f"检查课程 {lcl[2]} 余量")
+                        try:
+                            lefts = self.get_left(lcl)
+                            if lefts is None:
                                 errs.appendleft(time())
-                                logger.error(f"选课 {cl[2]}_{cl[1]} 时发生错误: {e}")
-                            finally:
-                                sleep(2)  # 避免请求过快导致服务器拒绝
-                        elif left == -1:
-                            logger.error(f"课程 {cl[2]}_{cl[1]} 余量信息异常")
-                        else:
-                            logger.info(f"课程 {cl[2]}_{cl[1]} 无余量")
-                    sleep(2)
-                logger.info(
-                    f"当前还有{len(classes)}门课程未选上，分别为{','.join(mp[i] for i in classes.keys())}。等待10秒后继续检查"
-                )
-                if suc:
-                    sc_send(
-                        "选课成功",
-                        desp=f"已成功选上课程: {', '.join(f'{i[2]}_{i[1]}' for i in suc)}",
+                                logger.error(f"获取课程 {lcl[2]} 余量时返回异常")
+                                continue
+                        except Exception as e:
+                            errs.appendleft(time())
+                            logger.error(f"获取课程 {lcl[2]} 余量时发生错误: {e}")
+                            continue
+                        for i, left in enumerate(lefts):
+                            cl = (lcl[0], lcl[1][i], lcl[2])
+                            if left > 0:
+                                logger.info(
+                                    f"课程 {cl[2]}_{cl[1]} 有余量: {left}，开始选课"
+                                )
+                                try:
+                                    ret = self.select(cl)
+                                    if ret:
+                                        suc.append(cl)
+                                        classes.pop(cl[0])
+                                        break
+                                except Exception as e:
+                                    errs.appendleft(time())
+                                    logger.error(f"选课 {cl[2]}_{cl[1]} 时发生错误: {e}")
+                                finally:
+                                    sleep(self.interval_1)  # 避免请求过快导致服务器拒绝
+                            elif left == -1:
+                                logger.error(f"课程 {cl[2]}_{cl[1]} 余量信息异常")
+                            else:
+                                logger.info(f"课程 {cl[2]}_{cl[1]} 无余量")
+                        sleep(self.interval_1)
+                    logger.info(
+                        f"当前还有{len(classes)}门课程未选上，分别为{','.join(mp[i] for i in classes.keys())}。等待{self.interval_2}秒后继续检查"
                     )
-                sleep(10)  # 等待10秒后继续检查
+                    if suc:
+                        sc_send(
+                            "选课成功",
+                            desp=f"已成功选上课程: {', '.join(f'{i[2]}_{i[1]}' for i in suc)}",
+                        )
+                except ReloginException as e:
+                    logger.error(f"需要重新登录: {e}")
+                    sc_send("选课异常", desp=f"需要重新登录: {e}")
+                    self.login()
+                    continue
+                except LessonsException as e:
+                    logger.error(f"选课过程中发生错误: {e}")
+                    sc_send("选课异常", desp=f"选课过程中发生错误: {e}")
+                    errs.appendleft(time())
+                    continue
+                except Exception as e:
+                    logger.error(f"意外错误: {e}")
+                    sc_send("选课异常", desp=f"选课过程中发生意外错误: {e}")
+                    errs.appendleft(time())
+                    continue
+                sleep(self.interval_2)  # 等待10秒后继续检查
 
             logger.info("自动选课完成")
 

@@ -50,6 +50,12 @@ SC_KEY=你的ServerChan密钥
 
 # 教务系统地址（可选，默认为辽宁大学）
 base=http://jwstudent.lnu.edu.cn
+
+# 查询间隔
+# 每次选课请求间隔
+INTERVAL_1=2
+# 完成一轮选课后的间隔
+INTERVAL_2=10
 ```
 
 你可以查看`.env_demo`查看样例。
