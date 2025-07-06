@@ -200,7 +200,7 @@ class Lessons:
         html = res.text
         match = re.search(r"fajhh=(\d+)", html)
         if not match:
-            print(html)
+            # print(html)
             raise LessonsException("未找到培养方案编号")
         self.fajhh = match.group(1)
 
@@ -227,7 +227,7 @@ class Lessons:
         if not self.term:
             raise LessonsException("未找到学期信息")
 
-        print(self.fajhh, self.term)
+        # print(self.fajhh, self.term)
 
     def read_lessons(self) -> List[tuple[str, str, str]]:
         classes = []
@@ -285,7 +285,7 @@ class Lessons:
 
         for item in cls:
             if item["classNum"] in cl[1]:
-                print(item["classNum"],type(item["classNum"]))
+                # print(item["classNum"],type(item["classNum"]))
                 if item["kcm"] != cl[2]:
                     logger.critical(
                         f"课程 {cl[2]} 的课程名与查询信息不匹配: {item['kcm']} != {cl[2]}"
@@ -355,7 +355,7 @@ class Lessons:
         html = response.text
         redisKey = re.search(r'var redisKey = "(.+)";', html)
         if not redisKey:
-            print(html)
+            # print(html)
             logger.error(f"选课 {cl[2]} 时未找到 redisKey")
             return False
         redisKey = redisKey.group(1)
@@ -381,7 +381,7 @@ class Lessons:
                 else:
                     logger.info(f"选课成功: {text}")
             else:
-                print(f"第{cnt}次查询中...")
+                logger.info(f"第{cnt}次查询中...")
                 cnt += 1
                 sleep(1)
 
