@@ -202,12 +202,70 @@ class Lessons:
         if response.url == f"{self.base}/login?errorCode=concurrentSessionExpired":
             raise ReloginException("有人登录了您的账号！")
 
+    @staticmethod
+    def extract_questions_and_answers(html_content):
+        """提取题目ID和答案选项"""
+        results = []
+        
+        question_pattern = r'<input type="hidden"\s+id="([^"]+)">([^<]+)'
+        questions = re.findall(question_pattern, html_content)
+        
+        for question_id, question_text in questions:
+            question_text = question_text.strip()
+            
+            answer_pattern = rf'name="{re.escape(question_id)}"[^>]+value="([^"]+)"[^>]*>\s*<span[^>]*class="lbl">([^<]+)</span>'
+            answers = re.findall(answer_pattern, html_content)
+            
+            results.append({
+                'id': question_id,
+                'question': question_text,
+                'answers': {value: text.strip() for value, text in answers}
+            })
+        
+        return results
+
     def get_base_info(self):
         res = self.session.get(f"{self.base}/student/courseSelect/courseSelect/index")
         res.raise_for_status()
         html = res.text
+        # html = Path("test.html").read_text("utf-8")
         if "对不起，当前为非选课阶段！" in html:
             raise WaitException("当前为非选课阶段！")
+        if "/student/courseSelect/viewSelectCoursePaper/checkDa" in html:
+            # 答题
+            # debugging
+            questions = self.extract_questions_and_answers(html)
+            ansFile = Path("answers.txt")
+            if not ansFile.exists():
+                logger.error("需要答题")
+                quetxt = []
+                for que in questions:
+                    t = ""
+                    t += f"题目: {que['question']}\n"
+                    for value, text in que['answers'].items():
+                        que+=f"  {value}: {text}\n"
+                    quetxt.append(t)
+                logger.info("\n-----------\n".join(quetxt))
+                sc_send("需要答题","\n-----------\n".join(quetxt))
+                raise LessonsException("需要答题")
+            ans = ansFile.read_text().splitlines()
+            if len(ans) != len(questions):
+                raise LessonsException("答案与题目不匹配")
+            l = []
+            for i in range(len(ans)):
+                l.append(questions[i]["id"]+"@"+ans[i].strip())
+            logger.debug("答题  -  "+"info="+",".join(l))
+            res = self.session.post(f"{self.base}/student/courseSelect/viewSelectCoursePaper/checkDa",
+                              data={"info": ",".join(l)},  # 使用字典格式
+                              headers={
+                                  'Content-Type': 'application/x-www-form-urlencoded'
+                              })
+            res.raise_for_status()
+            ret = res.json()
+            if ret["result"] != "ok":
+                logger.error("答题失败",ret["result"])
+                raise ReloginException("重启")
+
         res = self.session.get(f"{self.base}/student/courseSelect/gotoSelect/index")
         res.raise_for_status()
         html = res.text
