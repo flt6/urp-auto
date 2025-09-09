@@ -36,6 +36,10 @@ class ReloginException(LessonsException):
     """用于处理需要重新登录的异常"""
     pass
 
+class WaitException(Exception):
+    "需要进一步等待"
+    pass
+
 
 def sc_send(title: str, desp: str):
     if not environ.get("SC_KEY"):
@@ -54,6 +58,7 @@ class Lessons:
         self.session = requests.session()
         self.term: Optional[str] = None
         self.fajhh: Optional[str] = None
+        self.waitcount = 0
 
         # 加载环境变量
         dotenv.load_dotenv()
@@ -126,8 +131,11 @@ class Lessons:
 
     @staticmethod
     def pwd_md5(string: str) -> str:
-        md5_part1 = hashlib.md5((string + "{Urp602019}").encode()).hexdigest().lower()
-        md5_part2 = hashlib.md5(string.encode()).hexdigest().lower()
+        first_md5 = hashlib.md5((string + "{Urp602019}").encode()).hexdigest().lower()
+        md5_part1 = hashlib.md5((first_md5).encode()).hexdigest().lower()
+        
+        password_with_salt = hashlib.md5((string).encode()).hexdigest().lower()
+        md5_part2 = hashlib.md5((password_with_salt).encode()).hexdigest().lower()
         final_result = md5_part1 + "*" + md5_part2
         return final_result
 
@@ -195,6 +203,11 @@ class Lessons:
             raise ReloginException("有人登录了您的账号！")
 
     def get_base_info(self):
+        res = self.session.get(f"{self.base}/student/courseSelect/courseSelect/index")
+        res.raise_for_status()
+        html = res.text
+        if "对不起，当前为非选课阶段！" in html:
+            raise WaitException("当前为非选课阶段！")
         res = self.session.get(f"{self.base}/student/courseSelect/gotoSelect/index")
         res.raise_for_status()
         html = res.text
@@ -391,7 +404,7 @@ class Lessons:
     def login(self):
         logger.info("尝试登录")
         flag = False
-        for i in range(10):
+        for i in range(2):
             try:
                 if self._login():
                     flag = True
@@ -406,7 +419,22 @@ class Lessons:
         try:
             self.login()
             logger.info("获取基础信息")
-            self.get_base_info()
+            flag = True
+            while flag:
+                if self.waitcount > 120:
+                    sc_send("选课异常","未到选课时间，等待超时。")
+                    logger.critical("Waiting too much time, not selecting.")
+                    exit(-1)
+                try:
+                    self.get_base_info()
+                    flag = False
+                except WaitException:
+                    logger.warning("当前非选课时间")
+                    self.waitcount += 1
+                    sleep(self.interval_2)
+            if self.waitcount:
+                sc_send("选课通知","开始自动选课。")
+                        
             classes_src = self.read_lessons()
             classes: dict[str, tuple[str, list[str], str]] = {}
             mp: dict[str, str] = {}  # {"课程号": "课程名称"}
@@ -507,6 +535,11 @@ class Lessons:
 
             logger.info("自动选课完成")
 
+        except WaitException as e:
+            logger.error("当前非选课时间")
+            logger.error("不应该被这个except捕捉")
+            sleep(self.interval_2)
+            self.auto_spider()
         except LessonsException as e:
             logger.error(f"选课过程中发生错误: {e}")
             sc_send("选课异常", desp=f"选课过程中发生错误: {e}")
