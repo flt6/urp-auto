@@ -243,7 +243,7 @@ class Lessons:
                     t = ""
                     t += f"题目: {que['question']}\n"
                     for value, text in que['answers'].items():
-                        que+=f"  {value}: {text}\n"
+                        t+=f"  {value}: {text}\n"
                     quetxt.append(t)
                 logger.info("\n-----------\n".join(quetxt))
                 sc_send("需要答题","\n-----------\n".join(quetxt))
