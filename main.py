@@ -36,6 +36,9 @@ class ReloginException(LessonsException):
     """用于处理需要重新登录的异常"""
     pass
 
+class QuestionException(LessonsException):
+    """用于处理答题相关的异常"""
+    pass
 class WaitException(Exception):
     "需要进一步等待"
     pass
@@ -54,26 +57,27 @@ def sc_send(title: str, desp: str):
 
 class Lessons:
 
-    def __init__(self):
+    def __init__(self,dotenv_path: Optional[Path] = None, dangerously_disable_init: bool = False):
         self.session = requests.session()
         self.term: Optional[str] = None
         self.fajhh: Optional[str] = None
         self.waitcount = 0
 
         # 加载环境变量
-        dotenv.load_dotenv()
+        if not dangerously_disable_init:
+            dotenv.load_dotenv(dotenv_path)
 
-        # 检查必需的环境变量
-        required_keys = [
-            "uname",
-            "password",
-            "recap_username",
-            "recap_password",
-            "FILE",
-        ]
-        for key in required_keys:
-            if not environ.get(key):
-                raise LessonsException(f"请在环境变量中设置{key}")
+            # 检查必需的环境变量
+            required_keys = [
+                "uname",
+                "password",
+                "recap_username",
+                "recap_password",
+                "FILE",
+            ]
+            for key in required_keys:
+                if not environ.get(key):
+                    raise LessonsException(f"请在环境变量中设置{key}")
 
         self.base = environ.get("base", "http://jwstudent.lnu.edu.cn")
         self.interval_1 = int(environ.get("INTERVAL_1", 2))  # 请求间隔，默认为2秒
@@ -247,10 +251,10 @@ class Lessons:
                     quetxt.append(t)
                 logger.info("\n-----------\n".join(quetxt))
                 sc_send("需要答题","\n-----------\n".join(quetxt))
-                raise LessonsException("需要答题")
+                raise QuestionException("需要答题"+"\n-----------\n".join(quetxt))
             ans = ansFile.read_text().splitlines()
             if len(ans) != len(questions):
-                raise LessonsException("答案与题目不匹配")
+                raise QuestionException("答案与题目不匹配")
             l = []
             for i in range(len(ans)):
                 l.append(questions[i]["id"]+"@"+ans[i].strip())
@@ -300,23 +304,24 @@ class Lessons:
 
         # print(self.fajhh, self.term)
 
-    def read_lessons(self) -> List[tuple[str, str, str]]:
+    def read_lessons(self,df:Optional[pd.DataFrame]=None) -> List[tuple[str, str, str]]:
         classes = []
-        file = Path(environ.get("FILE", "class.xlsx"))
-        if not file.is_file():
-            raise LessonsException(f"课程文件 {file} 不存在，请检查路径")
-        d: dict[str, Callable[[Path], pd.DataFrame]] = {
-            ".csv": pd.read_csv,
-            ".xlsx": pd.read_excel,
-            ".xls": pd.read_excel,
-            ".json": pd.read_json,
-        }
-        func = d.get(file.suffix.lower())
-        if func is None:
-            raise LessonsException(
-                f"不支持的文件格式: {file.suffix}. 仅支持 .csv, .xlsx, .xls, .json 格式"
-            )
-        df = func(file)
+        if df is None:
+            file = Path(environ.get("FILE", "class.xlsx"))
+            if not file.is_file():
+                raise LessonsException(f"课程文件 {file} 不存在，请检查路径")
+            d: dict[str, Callable[[Path], pd.DataFrame]] = {
+                ".csv": pd.read_csv,
+                ".xlsx": pd.read_excel,
+                ".xls": pd.read_excel,
+                ".json": pd.read_json,
+            }
+            func = d.get(file.suffix.lower())
+            if func is None:
+                raise LessonsException(
+                    f"不支持的文件格式: {file.suffix}. 仅支持 .csv, .xlsx, .xls, .json 格式"
+                )
+            df = func(file)
         df.columns = df.columns.str.strip()  # 去除列名两端的空格
         for col in ["课程号", "课序号", "课程名"]:
             if col not in df.columns:
@@ -490,6 +495,11 @@ class Lessons:
                     logger.warning("当前非选课时间")
                     self.waitcount += 1
                     sleep(self.interval_2)
+                except QuestionException:
+                    logger.error("需要答题")
+                    ans = Path("answers.txt")
+                    while not ans.exists():
+                        sleep(self.interval_2)
             if self.waitcount:
                 sc_send("选课通知","开始自动选课。")
                         

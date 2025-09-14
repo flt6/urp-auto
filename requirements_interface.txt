@@ -1,0 +1,7 @@
+python-dotenv
+pandas
+requests
+serverchan-sdk
+openpyxl
+streamlit
+streamlit_autorefresh
